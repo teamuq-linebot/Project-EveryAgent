@@ -53,7 +53,9 @@ interface AgentTeamsViewProps {
    *  目前僅「💬 對話」按鈕使用；其餘嵌入式入口仍走 openAgentSession。 */
   onOpenTeamSession?: (
     label: string,
-    prompt: string,
+    // 原始任務描述（不含前綴/隊長）。預填到監測任務的對話輸入框，由使用者按 Enter 送出時，
+    // 再由 ConversationPanel 依 initialTeam 補上 `<前綴><隊長> ` 前綴重建完整指令。
+    initialDraft: string,
     projectPath: string,
     tool: CliId,
     taskId: string,
@@ -788,7 +790,7 @@ export default function AgentTeamsView({ conv, onOpenTeamSession }: AgentTeamsVi
             // 4.3 寫回資料夾歷史（非阻塞）。
             void saveTeamFolder(teamId, r.folder);
 
-            // 4.4 initialPrompt = `<CLI 前綴><隊長 skillName> <任務>`（strip \r\n 由彈窗已處理）。
+            // 4.4 完整指令 = `<CLI 前綴><隊長 skillName> <任務>`（strip \r\n 由彈窗已處理）。
             //     前綴依彈窗選的 model：codex→`$`、claude→`/`、agy→無前綴（agy 無對應 skill，只送任務）。
             //     與 ConversationPanel 的 SKILL_PREFIX 規則一致。
             const SEND_PREFIX: Record<CliId, string> = { claude: '/', codex: '$', antigravity: '/' };
@@ -797,9 +799,12 @@ export default function AgentTeamsView({ conv, onOpenTeamSession }: AgentTeamsVi
 
             // 4.5 開真 session（taskId / tool=model / milestone / 裸 skillName 下拉預設）。
             if (onOpenTeamSession) {
+              // 真 session 路徑：傳「原始任務 r.task」當預填草稿（非完整 prompt），由監測任務頁
+              // 的對話輸入框預填 + initialTeam 下拉（=skillName）在送出時補前綴重建完整指令。
+              // 避免「預填已含前綴 + 送出再補一次前綴」的重複前綴。
               void onOpenTeamSession(
                 label,
-                prompt,
+                r.task,
                 r.folder,
                 r.model,
                 taskId,
@@ -807,7 +812,7 @@ export default function AgentTeamsView({ conv, onOpenTeamSession }: AgentTeamsVi
                 skillName,
               );
             } else {
-              // 嵌入式路徑：傳 initialSkill 讓對話面板預設到該隊長 skill
+              // 嵌入式路徑：仍走自動注入完整 prompt（agentConvService 兩段時序注入）。
               void openAgentSession(label, prompt, undefined, skillName);
             }
           })();

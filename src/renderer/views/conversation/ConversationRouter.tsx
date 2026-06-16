@@ -30,6 +30,10 @@ interface ConversationRouterProps {
   onAnswerAsk?: (toolUseId: string, optionIndex: number, label: string) => void
   /** 派遣下拉初始值（裸 skillName）；團隊 session 預設=隊長。空/未傳=直接對話。 */
   initialTeam?: string
+  /** 輸入框預填文字（團隊對話跳監測任務時帶入的原始任務描述）；空/未傳=不預填。經 ...rest 傳遞。 */
+  initialDraft?: string
+  /** CLI 是否開機完成（可送出）。false=對話框 gate「正在開機中…」、禁止送出。未傳=視為就緒。經 ...rest 傳遞。 */
+  inputReady?: boolean
   /** 該 session 實際在跑的 CLI；決定送出時的 skill 前綴。未傳=退回 claude 規則。 */
   cliId?: CliId
   /** 該 session 的執行狀態（card:runState）；running=AI 仍在工作（含中途停頓）→ 顯示「目前動作」指示。 */

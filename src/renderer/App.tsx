@@ -80,8 +80,9 @@ export default function App(): React.JSX.Element {
   } = useSession();
   const { theme, toggle: toggleTheme, setTheme } = useTheme();
 
-  // Agent Ops session initialPrompt 映射：sessionId → prompt 字串。
-  // 以 ref 持有（不需觸發 re-render），在 SessionTabHost 渲染時讀取並傳入。
+  // 團隊 session 的對話輸入框預填草稿映射：sessionId → 原始任務描述字串。
+  // 以 ref 持有（不需觸發 re-render），在 SessionTabHost 渲染時讀取並傳入（SessionTab
+  // 自動啟動 CLI + 預填到輸入框，由使用者按 Enter 送出；不自動注入 PTY）。
   const sessionInitialPromptsRef = useRef<Map<string, string>>(new Map());
 
   // 團隊 session 的 agent 下拉預設（裸 skillName）映射：sessionId → skillName。
@@ -235,13 +236,14 @@ export default function App(): React.JSX.Element {
   // 開啟團隊對話 session（AgentTeamsView 的「💬 對話」按鈕入口）：
   // taskId 為彈窗流程建的真 task local_id（取代原本傳 label）；tool=彈窗選的 model；
   // projectPath 由 TeamFolderPicker 選定後傳入；initialTeam=裸 skillName（下拉預設）。
+  // initialDraft=原始任務描述（預填到對話輸入框、由使用者按 Enter 送出，不自動注入 PTY）。
   // → openSession(taskId, label, milestoneId, {projectPath, tool}) → sessionId
-  // → sessionInitialPromptsRef 餵 initialPrompt、sessionInitialTeamsRef 餵下拉預設
+  // → sessionInitialPromptsRef 餵預填草稿、sessionInitialTeamsRef 餵下拉預設
   // → setActiveTab 跳到該 session tab。
   const handleOpenTeamSession = useCallback(
     async (
       label: string,
-      prompt: string,
+      initialDraft: string,
       projectPath: string,
       tool: CliId,
       taskId: string,
@@ -257,7 +259,7 @@ export default function App(): React.JSX.Element {
           forceNewSession: true,
         });
         if (!sid) return;
-        sessionInitialPromptsRef.current.set(sid, prompt);
+        sessionInitialPromptsRef.current.set(sid, initialDraft);
         sessionInitialTeamsRef.current.set(sid, initialTeam);
         setActiveTab(sid);
       } catch {

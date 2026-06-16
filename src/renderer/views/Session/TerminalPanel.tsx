@@ -15,12 +15,6 @@ interface Props {
   launchCommand?: string | null
   /** PTY 就緒（且 launchCommand 已注入）後觸發；供上層 flush 排隊中的輸入 */
   onReady?: () => void
-  /**
-   * PTY 就緒後自動注入的初始提示（如 `/tuq-agent 建立新的 agent team：…`）；
-   * null/空=不注入。注入時機：onReady 後再延遲 1500ms（等 claude CLI 完全啟動，
-   * 避免太早注入丟字）。只注入一次（防重複）。
-   */
-  initialPrompt?: string | null
 }
 
 type Status = 'connecting' | 'running' | 'killed' | 'error'
@@ -36,15 +30,12 @@ export default function TerminalPanel({
   projectPath,
   launchCommand,
   onReady,
-  initialPrompt,
 }: Props): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const [status, setStatus] = useState<Status>('connecting')
   const [errorMsg, setErrorMsg] = useState<string>('')
-  // initialPrompt 只注入一次（防重複）
-  const initialPromptInjectedRef = useRef(false)
 
   useEffect(() => {
     const container = containerRef.current
@@ -156,22 +147,15 @@ export default function TerminalPanel({
           // 一次性注入工具啟動指令（給 shell 一點時間起提示字元，對應 Qt 120ms）。
           // PTY「就緒」訊號放在注入之後 —— 否則上層 flush 的輸入會被打進
           // `claude --resume` 啟動前的裸 shell。無 launchCommand 則 spawn 完即就緒。
+          //
+          // 注意：不在此自動注入 initialPrompt。團隊對話跳監測任務的初始任務改為「預填到
+          // 對話輸入框、由使用者按 Enter 送出」（見 SessionTab/ConversationPanel 的 initialDraft）。
+          // 送出走 SessionTab.writeAndSubmit 的兩段寫入（text → 150ms → \r），繞開 codex TUI
+          // 對「prompt+\r 一包寫入」會少送一個 Enter（時序競態，時好時壞）的問題。
           if (launchCommand) {
             injectTimer = setTimeout(() => {
               window.tuq.pty.write(sessionId, launchCommand + '\r')
               onReady?.()
-              // initialPrompt 注入：在 launchCommand（claude CLI）注入完成後
-              // 再延遲 1500ms，等 claude CLI 完全起來（顯示互動介面），
-              // 才注入 /tuq-agent 指令，避免太早注入被 shell 吃掉而非 claude 收到。
-              // 只注入一次（initialPromptInjectedRef 守門）。
-              if (initialPrompt && !initialPromptInjectedRef.current) {
-                initialPromptInjectedRef.current = true
-                setTimeout(() => {
-                  if (!disposed) {
-                    window.tuq.pty.write(sessionId, initialPrompt + '\r')
-                  }
-                }, 1500)
-              }
             }, 300)
           } else {
             onReady?.()

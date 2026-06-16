@@ -58,6 +58,19 @@ interface Props {
   onAnswerAsk?: (toolUseId: string, optionIndex: number, label: string) => void
   /** 派遣下拉初始值（裸 skillName）；團隊 session 預設=隊長。空/未傳=直接對話。 */
   initialTeam?: string
+  /**
+   * 輸入框預填文字（團隊對話跳監測任務時帶入的原始任務描述）；空/未傳=不預填。
+   * 只在元件首次掛載時填入一次（lazy useState init），之後使用者可自由編輯/送出。
+   * 配合 initialTeam（下拉預設隊長），送出時由既有 SKILL_PREFIX 邏輯補上 `<前綴><隊長> `，
+   * 重建完整指令——不重複前綴。改採「預填＋使用者按 Enter」是為了繞開 codex 自動注入
+   * Enter 的時序競態（見 TerminalPanel）。
+   */
+  initialDraft?: string
+  /**
+   * CLI 是否開機完成（可送出）。false=輸入框 gate「正在開機中…」：送出鈕禁用、Enter 不送出。
+   * 未傳=視為就緒（向後相容；只有監測任務的 SessionTab 會傳此旗標）。
+   */
+  inputReady?: boolean
   /** 該 session 實際在跑的 CLI；決定送出時的 skill 前綴（見 SKILL_PREFIX）。未傳=退回 claude 規則。 */
   cliId?: CliId
   /** 該 session 的執行狀態（card:runState）；running=AI 仍在工作（含中途停頓）→ 顯示「目前動作」指示。 */
@@ -88,6 +101,8 @@ export default function ConversationPanel({
   onCollapse,
   onAnswerAsk,
   initialTeam,
+  initialDraft,
+  inputReady = true,
   cliId,
   runState,
   workflows,
@@ -95,7 +110,8 @@ export default function ConversationPanel({
   toolValues,
   onToolChange,
 }: Props): React.JSX.Element {
-  const [draft, setDraft] = useState('')
+  // 首次掛載以 initialDraft 預填（之後使用者自由編輯）；團隊對話跳監測任務時帶入原始任務描述。
+  const [draft, setDraft] = useState(initialDraft ?? '')
   // 派遣對象：'' = 直接對話；其餘為 skill 名（送出時前置 `/<name> `）。
   // 團隊 session 以隊長 skillName 為初始值（§4.3）。
   const [team, setTeam] = useState(initialTeam ?? '')
@@ -230,6 +246,7 @@ export default function ConversationPanel({
   }, [sessionId])
 
   const send = useCallback(() => {
+    if (!inputReady) return // CLI 開機中：gate 住不送出（Enter / 送出鈕都擋）
     const text = draft.trim()
     if (!text) return
     // 選了派遣對象 → 依該 session 的 CLI 前置 skill 前綴：claude `/`、codex `$`、agy 無前綴。
@@ -242,7 +259,7 @@ export default function ConversationPanel({
     setThinking(true)
     if (thinkingTimerRef.current) clearTimeout(thinkingTimerRef.current)
     thinkingTimerRef.current = setTimeout(() => setThinking(false), THINKING_TIMEOUT_MS)
-  }, [draft, team, onSend, cliId, messages])
+  }, [draft, team, onSend, cliId, messages, inputReady])
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -546,12 +563,12 @@ export default function ConversationPanel({
             <textarea
               className="conversation-panel__input"
               value={draft}
-              placeholder="輸入訊息…（Enter 送出，Shift+Enter 換行）"
+              placeholder={inputReady ? '輸入訊息…（Enter 送出，Shift+Enter 換行）' : '正在開機中…（可先檢視/修改，就緒後即可送出）'}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={onKeyDown}
             />
-            <button className="conversation-panel__send" onClick={send}>
-              送出
+            <button className="conversation-panel__send" onClick={send} disabled={!inputReady} title={inputReady ? undefined : 'CLI 正在開機中，就緒後即可送出'}>
+              {inputReady ? '送出' : '⏳ 開機中…'}
             </button>
           </div>
         </>

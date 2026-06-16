@@ -15,7 +15,10 @@ import ConversationPanel from '../conversation/ConversationRouter'
 interface Props {
   session: OpenSession
   onClose: (sessionId: string) => void
-  /** PTY 就緒後自動注入的初始提示（Agent Ops 操作用）；null/空=不注入 */
+  /**
+   * 團隊對話跳監測任務時帶入的原始任務描述；null/空=純監測（lazy 啟動 CLI）。
+   * 有值時自動啟動 CLI，並預填到對話輸入框（不自動注入 PTY），由使用者按 Enter 送出。
+   */
   initialPrompt?: string | null
   /** 團隊 session 的 agent 下拉預設（裸 skillName）；空=不預選 */
   initialTeam?: string
@@ -23,6 +26,13 @@ interface Props {
 
 /** 工具選項（header 專案設定列；對應 Qt session_terminal_panel_const.TOOL_VALUES） */
 const TOOL_VALUES = ['claude', 'codex', 'vscode', 'custom'] as const
+
+// CLI 開機緩衝（從 onReady = 啟動指令已送出 起算）：PTY spawn + 送出啟動指令 ≠ TUI 已可收輸入。
+// 這段期間對話框 gate「正在開機中…」、禁止送出，避免使用者搶按 Enter 把字打進尚未就緒的 TUI 而丟字。
+// codex（Rust TUI，冷啟動較慢且時間不定）給較長緩衝；其餘 CLI 給較短。送出本身走 writeAndSubmit
+// 兩段寫入，gate 只需擋住「開機途中」即可，不必精準對齊就緒時點。
+const CODEX_BOOT_GRACE_MS = 1800
+const CLI_BOOT_GRACE_MS = 1200
 
 /**
  * SessionTab — 單一開啟 session 的完整 UI（對應 Qt QtSessionTab）。
@@ -51,8 +61,12 @@ export default function SessionTab({ session, onClose, initialPrompt, initialTea
   const [runState, setRunState] = useState<CardRunStatePayload['state']>('none')
   // 該 session 的 workflow 進度（card:workflowProgress，依 taskId 過濾）→ 對話框上方進度卡。
   const [workflows, setWorkflows] = useState<WorkflowRunSummary[]>([])
-  // PTY 是否已就緒（spawn + launchCommand 注入完成）；未就緒時對話框輸入先排隊。
+  // PTY 是否已就緒（spawn + launchCommand 注入 + 開機緩衝完成 → 可送出）；未就緒時對話框輸入先排隊。
   const ptyReadyRef = useRef(false)
+  // CLI 是否開機完成（可送出）。驅動對話框「正在開機中…」gate；onReady 後等開機緩衝才設 true。
+  const [cliReady, setCliReady] = useState(false)
+  // 開機緩衝計時器（換綁/卸載時清除，避免對已換掉的 PTY 解除 gate）。
+  const bootTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // 排隊中的對話框輸入：存「原始 text」（不帶 \r）；flush 時才走兩段寫補送 Enter。
   const pendingInputRef = useRef<string[]>([])
   const { state: monitorState, start, stop, listSessions, rebind, rename } = useMonitor(
@@ -144,6 +158,8 @@ export default function SessionTab({ session, onClose, initialPrompt, initialTea
       claudeIdRef.current = r.claudeSessionId
       if (changed && cliStarted) {
         ptyReadyRef.current = false // 新 PTY 注入完才再就緒
+        setCliReady(false) // 重掛 → 重新開機 → 重新 gate「正在開機中…」
+        if (bootTimerRef.current) clearTimeout(bootTimerRef.current)
         setPtyEpoch((e) => e + 1)
       }
       // 換綁成功（無論 session 是否真的變了）→ 觸發對話重置轉場
@@ -165,10 +181,11 @@ export default function SessionTab({ session, onClose, initialPrompt, initialTea
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 團隊對話流程開的 session 帶 initialPrompt（含使用者剛在「開始團隊對話」輸入的任務描述）：
-  // 一進來就自動啟動 CLI（背景 spawn PTY → 注入啟動指令 + initialPrompt），不必等使用者手動
-  // 「開啟 CLI」。純監測（無 initialPrompt，如雙擊看板卡）維持 lazy 啟動。
-  // initialPrompt 的實際注入由 TerminalPanel 在 PTY 就緒後完成（只注入一次）。
+  // 團隊對話流程開的 session 帶 initialPrompt（使用者剛在「開始團隊對話」輸入的原始任務描述）：
+  // 一進來就自動啟動 CLI（背景 spawn PTY → 注入啟動指令），不必等使用者手動「開啟 CLI」。
+  // 純監測（無 initialPrompt，如雙擊看板卡）維持 lazy 啟動。
+  // 任務文字不自動注入 PTY，改為預填到對話輸入框（ConversationPanel 的 initialDraft），由使用者
+  // 按 Enter 送出 → 走 writeAndSubmit 兩段寫入（繞開 codex 自動 Enter 的時序競態）。
   useEffect(() => {
     if (initialPrompt && initialPrompt.trim()) setCliStarted(true)
   }, [initialPrompt])
@@ -227,6 +244,8 @@ export default function SessionTab({ session, onClose, initialPrompt, initialTea
           (r.data.projectPath || '') !== prevPath || r.data.launchCommand !== prevLaunch
         if (changed && cliStarted) {
           ptyReadyRef.current = false // 新 PTY 注入完才再就緒
+          setCliReady(false) // 重掛 → 重新開機 → 重新 gate「正在開機中…」
+          if (bootTimerRef.current) clearTimeout(bootTimerRef.current)
           setPtyEpoch((e) => e + 1)
         }
       }
@@ -346,17 +365,30 @@ export default function SessionTab({ session, onClose, initialPrompt, initialTea
     [writeAndSubmit],
   )
 
-  // TerminalPanel 回報 PTY 就緒（含 launchCommand 注入後）→ 依序 flush 排隊輸入。
+  // TerminalPanel 回報 PTY 就緒（spawn + launchCommand 已送出）。但 CLI TUI 還在開機
+  // （codex 尤其慢、時間不定），故再等一段開機緩衝才解除「正在開機中…」gate、開放送出並
+  // flush 排隊輸入——避免太早把字打進尚未就緒的 TUI 而丟字（codex「少一個 Enter」的時序競態）。
   const handlePtyReady = useCallback(() => {
-    ptyReadyRef.current = true
-    const pending = pendingInputRef.current
-    pendingInputRef.current = []
-    // 多筆依序送，每筆間隔 ~400ms（text → 150ms → \r → 250ms → 下一筆），
-    // 避免連發黏成一次 paste。
-    pending.forEach((text, i) => {
-      setTimeout(() => writeAndSubmit(text), i * 400)
-    })
-  }, [writeAndSubmit])
+    if (bootTimerRef.current) clearTimeout(bootTimerRef.current)
+    const head = (launchCommand ?? '').trim().split(/\s+/)[0]
+    const bootDelay = head === 'codex' ? CODEX_BOOT_GRACE_MS : CLI_BOOT_GRACE_MS
+    bootTimerRef.current = setTimeout(() => {
+      ptyReadyRef.current = true
+      setCliReady(true)
+      const pending = pendingInputRef.current
+      pendingInputRef.current = []
+      // 多筆依序送，每筆間隔 ~400ms（text → 150ms → \r → 250ms → 下一筆），
+      // 避免連發黏成一次 paste。
+      pending.forEach((text, i) => {
+        setTimeout(() => writeAndSubmit(text), i * 400)
+      })
+    }, bootDelay)
+  }, [writeAndSubmit, launchCommand])
+
+  // 卸載時清開機緩衝計時器（避免對已關閉的 session 解除 gate / 觸發送出）。
+  useEffect(() => () => {
+    if (bootTimerRef.current) clearTimeout(bootTimerRef.current)
+  }, [])
 
   // ---- 身分列（header）：任務識別（專案路徑移至監測面板綁定列上方；AI 模組移至對話面板頂端）----
   const identityBar = (
@@ -423,6 +455,8 @@ export default function SessionTab({ session, onClose, initialPrompt, initialTea
                   onCollapse={() => setConvExpanded(false)}
                   onAnswerAsk={handleAnswerAsk}
                   initialTeam={initialTeam}
+                  initialDraft={initialPrompt ?? undefined}
+                  inputReady={cliReady}
                   cliId={cliId}
                   runState={runState}
                   workflows={workflows}
@@ -466,7 +500,6 @@ export default function SessionTab({ session, onClose, initialPrompt, initialTea
                 tool={session.tool}
                 launchCommand={launchCommand}
                 onReady={handlePtyReady}
-                initialPrompt={initialPrompt}
               />
             </div>
           </>
