@@ -1,0 +1,21 @@
+agent: calculator
+title: "Calculator Agent"
+display_name: "計算專員"
+team: agent-ops
+type: worker
+role_in_team: shared
+reports_to: agent-ops/manager  # agent-ops team-local 版；僅由 agent-ops/manager 派遣
+
+bootstrap:
+  - soul.md
+  - org.md
+  - tools.md
+
+workflow: workflow.yaml
+
+dispatch:
+  model: sonnet  # 2026-04-27: haiku→sonnet（user policy: ban haiku）
+  trigger: "任何需要數學計算、數值分析、統計運算、單位換算、日期計算的場景"
+  not_for: "不需要精確數值的場景（如概略估算、趨勢描述）"
+
+skills: skills.md

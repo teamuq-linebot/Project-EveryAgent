@@ -1,0 +1,51 @@
+{
+  "$schema_version": "1.0",
+  "description": "Centralized ban-policy patterns for nightly_policy_grep.sh. Adding/removing rules requires Agent Builder approval (subtraction) or self-serve (addition).",
+  "last_updated": "2026-05-01",
+  "source": "agents/agent-ops/_protocols/rules/no-haiku-policy.md (initial seed: ban-haiku rules)",
+  "rules": [
+    {
+      "name": "ban-haiku-dispatch-model",
+      "pattern": "model:\\s*[\"']?haiku\\b",
+      "glob": ["**/*.yaml", "**/*.md"],
+      "whitelist_paths": [
+        "**/governance/reports/**",
+        "**/memory/**",
+        "**/output/**",
+        "**/archive/**",
+        "agents/agent-ops/_protocols/rules/no-haiku-policy.md",
+        "agents/agent-ops/_protocols/rules/banned-patterns.json",
+        "agents/agent-ops/_protocols/rules/rule-rollout-closure.md",
+        "scripts/README_policy_grep.md",
+        "**/feedback_no_haiku_*.md"
+      ],
+      "severity": "blocker",
+      "rationale": "2026-04-27 user policy: ban haiku, all sonnet/opus only"
+    },
+    {
+      "name": "ban-haiku-org-hierarchy",
+      "pattern": "\\(haiku\\)",
+      "glob": ["**/manager/{org.md,tools.md}", "**/SKILL.md", "**/README.md"],
+      "whitelist_paths": [
+        "**/governance/reports/**",
+        "**/memory/**",
+        "**/output/**",
+        "**/archive/**"
+      ],
+      "severity": "blocker",
+      "rationale": "Manager dispatch reference 不得列 haiku"
+    },
+    {
+      "name": "ban-haiku-worklog-cmd",
+      "pattern": "worklog\\.sh\\s+start\\s+\\S+\\s+haiku\\b",
+      "glob": ["**/*.yaml", "**/*.md"],
+      "whitelist_paths": [
+        "**/output/**",
+        "**/memory/**",
+        "**/archive/**"
+      ],
+      "severity": "high",
+      "rationale": "worklog 命令 model 參數應與 agent.yaml dispatch.model 一致"
+    }
+  ]
+}

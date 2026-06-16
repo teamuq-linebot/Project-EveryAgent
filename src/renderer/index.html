@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- CSP 由 main 程序依 dev/prod 動態注入（見 src/main/index.ts onHeadersReceived），不寫死在 meta -->
+    <title>快組隊-AI團隊</title>
+  </head>
+  <body>
+    <!--
+      開機畫面（boot splash）：在任何外部 CSS/JS 載入前就顯示，消滅 React 掛載前的純白窗。
+      樣式全部內聯於下方 <style>，不依賴 global.css（global.css 在 bundle 載入後才到）。
+      控制邏輯（淡出 / 安全保底計時器）全在 main.tsx——因生產版 CSP 為 script-src 'self'
+      （無 unsafe-inline），inline <script> 會被擋掉，故不可寫在此處。內聯 <style> 不受影響
+      （style-src 含 unsafe-inline）。
+    -->
+    <style>
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 22px;
+        background: #ffffff;
+        color: #171717;
+        font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft JhengHei', sans-serif;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      #boot-splash.boot-splash--hide {
+        opacity: 0;
+        transition: opacity 0.25s ease;
+        pointer-events: none;
+      }
+      .boot-splash__spinner {
+        width: 44px;
+        height: 44px;
+        border: 4px solid #eaf6fc;
+        border-top-color: #51aee5;
+        border-radius: 50%;
+        animation: boot-splash-spin 0.8s linear infinite;
+      }
+      .boot-splash__brand {
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: 2px;
+        color: #171717;
+      }
+      .boot-splash__subtitle {
+        margin-top: 2px;
+        font-size: 13px;
+        color: #737373;
+        letter-spacing: 1px;
+      }
+      #boot-splash-status {
+        font-size: 13px;
+        color: #51aee5;
+        letter-spacing: 0.5px;
+      }
+      @keyframes boot-splash-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      /* 減少動態偏好：停用旋轉動畫，改用靜態淡入提示（對齊 global.css 既有慣例） */
+      @media (prefers-reduced-motion: reduce) {
+        .boot-splash__spinner {
+          animation: none;
+          border-top-color: #51aee5;
+          opacity: 0.85;
+        }
+      }
+    </style>
+    <div id="boot-splash">
+      <div class="boot-splash__spinner"></div>
+      <div>
+        <div class="boot-splash__brand">快組隊</div>
+        <div class="boot-splash__subtitle">AI 團隊協作平台</div>
+      </div>
+      <div id="boot-splash-status">正在啟動…</div>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

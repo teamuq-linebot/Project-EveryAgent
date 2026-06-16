@@ -1,0 +1,60 @@
+name: Governance Review
+description: Agent 系統變更的合規審查工作流
+
+error_policy:
+  default: continue
+  max_retries: 1
+  on_step_error: continue
+
+steps:
+  - id: check_memory
+    action: read_memory
+    path: memory/MEMORY.md
+    on_error: continue
+
+  - id: feedback_detect # self-added 2026-04-26
+    action: manager_self
+    note: "偵測上游 Manager 對 Governance 審查結果的正/負面回饋語意，觸發 memory 保存"
+    on_error: continue
+
+  - id: memory_hygiene_check # self-added 2026-04-26
+    action: manager_self
+    note: "回顧 memory/：有無超過 90 天未 touch 的條目可歸檔？MEMORY.md 索引是否一致？"
+    on_error: continue
+
+  - id: review
+    action: route
+    on: review
+    ref: workflow/review-flow.md
+    on_error: continue
+
+  - id: rollout_closure_check # self-added 2026-05-01; modified 2026-06-09 self-contained-ops-20260609 team-local 化
+    action: manager_self
+    note: "若任務包含 rule/policy rollout（依 trace_id 或 task_summary 判斷），在 agents/agent-ops/ 目錄內執行 grep gate（只掃本 team 5 個 agent 的 soul.md/tools.md/skills.md/workflow.yaml/workflow/*.md）：`bash scripts/nightly_policy_grep.sh --path agents/agent-ops/`；發現 violation 視為 rollout 未 closure，回報並暫停。參考 agents/agent-ops/_protocols/rules/rule-rollout-closure.md。"
+    on_error: continue
+
+  - id: save_memory
+    action: write_memory
+    path: memory/
+    on_error: continue
+
+  - id: output_change_summary  # self-added 2026-05-28 白話改動總結; modified 2026-06-03 輸出改 changed_files 清單; abs-path 2026-06-04
+    action: manager_self
+    note: |
+      回覆上層（user / manager）的訊息「最後一段」必須附上本次任務的「改動檔案清單」，用合法 JSON 格式（可被 parse），列出實際新增 / 修改 / 刪除的所有檔案路徑（含各 worker 產出）：
+
+      ```json
+      {
+        "changed_files": [
+          "C:/teamuq/teamuq-electron/src/renderer/views/Session/SessionTab.tsx",
+          "T:/共用雲端硬碟/快組隊.Agents/AgentOrg/output/sw/xxx/evidence.md"
+        ]
+      }
+      ```
+
+      - 路徑一律用「完整絕對路徑」（從磁碟機根開始，如 C:/... 或 T:/...）；**禁止相對路徑**。專案內檔案要把 CWD / 專案根目錄補上，讓每個 entry 不依賴 CWD 即可定位
+      - Windows 路徑寫進 JSON：建議用正斜線 `/`（合法且免跳脫）；若用反斜線需跳脫成 `\\`
+      - 只列本次實際異動（新增/修改/刪除）的檔案；不要列只讀取或查看過的檔
+      - 純查詢 / 分析（沒有改任何檔）：省略整段，完全不輸出此 JSON
+      - 這是回覆的最後一段，放在所有其他輸出之後，且必須是合法 JSON（可被 parse）
+    on_error: continue

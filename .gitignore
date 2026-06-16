@@ -1,0 +1,22 @@
+node_modules/
+out/
+dist/
+output/
+tests/e2e/**/__snapshots__/
+test-results/
+playwright-report/
+tmp-screens/
+tests/
+training-local-only/
+.env
+*.log
+.env.*
+.claude/
+# 內建 AgentOrg 範本的 .claude/skills 必須入版控（tuq-agent-builtin-bundle-20260611）
+# gitignore 無前導斜線的 .claude/ 會匹配任意層級，加 negation 例外讓 resources/ 下的子樹可追蹤
+!resources/agent-templates/.claude/
+!resources/agent-templates/.claude/**
+# ABI escape hatch：Node-ABI 版 better-sqlite3 拷貝（測試用產物，重生靠
+# `npm run rebuild:test-abi` / .claude/scripts/rebuild-test-abi.mjs）。
+.abi-node-bsq3/
+

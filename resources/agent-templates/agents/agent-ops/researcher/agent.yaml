@@ -1,0 +1,25 @@
+agent: researcher
+title: "Agent Ops Researcher"
+display_name: "Agent 系統研究員"
+team: agent-ops
+type: worker
+role_in_team: researcher
+reports_to: agent-ops/manager
+
+# Bootstrap sequence — read in order before starting workflow
+bootstrap:
+  - soul.md
+  - org.md
+  - tools.md
+
+# Execution entry point
+workflow: workflow.yaml
+
+# Dispatch information (for Manager routing decisions)
+dispatch:
+  model: sonnet
+  trigger: "agent 系統現狀盤點、worklog/index.jsonl 統計、cross-agent 觀測、protocol 規則考古、agent 能力缺口識別"
+  not_for: "建立/修改 agent 檔案（agent-builder）、policy 審查（governance）、改進建議（evolution）、應用程式碼研究（sw/researcher）"
+
+# On-demand capabilities
+skills: skills.md

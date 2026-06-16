@@ -1,0 +1,24 @@
+agent: manager
+title: "Agent Ops Manager"
+display_name: "系統維運組長"
+team: agent-ops
+type: manager
+reports_to: user
+
+# Bootstrap sequence — read in order before starting workflow
+bootstrap:
+  - soul.md
+  - org.md
+  - tools.md
+
+# Execution entry point
+workflow: workflow.yaml
+
+# Dispatch information (for Manager routing decisions)
+dispatch:
+  model: opus
+  trigger: "所有 agent 系統相關任務：建立、修改、分析、演進 agent 系統"
+  not_for: "應用程式碼開發（SW Manager）、CI/CD 部署、測試程式碼、教材內容（Edu Manager）"
+
+# On-demand capabilities
+skills: skills.md

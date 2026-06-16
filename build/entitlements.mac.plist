@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- 允許 JIT 編譯（Chromium / V8 需要） -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <!-- 允許載入未簽章的可執行記憶體（native addon / node-pty 需要） -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <!-- 允許載入非 Apple 或本 app 簽章的 dylib（better-sqlite3 / node-pty .node 需要） -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- network client（electron-updater 檢查更新） -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+  </dict>
+</plist>

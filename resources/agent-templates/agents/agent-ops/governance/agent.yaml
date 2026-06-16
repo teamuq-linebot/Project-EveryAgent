@@ -1,0 +1,26 @@
+agent: governance
+title: "Governance Agent"
+display_name: "治理審查專員"
+team: agent-ops
+type: worker
+role_in_team: verifier
+cross_team_verifier: true
+reports_to: agent-ops/manager
+
+# Bootstrap sequence — read in order before starting workflow
+bootstrap:
+  - soul.md
+  - org.md
+  - tools.md
+
+# Execution entry point
+workflow: workflow.yaml
+
+# Dispatch information (for Manager routing decisions)
+dispatch:
+  model: opus
+  trigger: "審查 Agent Builder 建立或修改的 agent 系統檔案變更"
+  not_for: "建立或修改 agent（Agent Builder）、搜尋資訊（Researcher）、應用程式碼審查"
+
+# On-demand capabilities
+skills: skills.md

@@ -1,0 +1,207 @@
+name: Agent Ops Manager Orchestration (Gold Standard)
+description: 骨幹流程 — 各步驟細節見 workflow/XXX-flow.md。此為金標準範本，所有 Manager 以此為參照。
+
+error_policy:
+  default: retry_once
+  max_retries: 1
+  on_max_retries: report_gap_to_user
+  block_and_report:  # self-added 2026-05-09 rule23-rollout-phase2
+    semantics: "稽核 step 發現宣稱與事實不符 / inline_verify 缺漏 → 立刻停止流程、返回具體 blocker 給 Manager，不 retry"
+    used_by: [inline_verify_gate, verify]
+    on_trigger: stop_and_surface_blockers
+
+steps:
+  - id: init_output_path  # self-added 2026-05-01 rule-rollout (output-path-confirmation)
+    action: manager_self
+    note: |
+      依 agents/agent-ops/_protocols/rules/output-placement.md §5.2 必做四步驟（在第一次 dispatch 之前）：
+      1. 決定 task_id：{business-context}-YYYYMMDD（衝突加 -r2 後綴）
+      2. 組合 output_path：$CLAUDE_PROJECT_DIR/output/{TEAM}/{task_id}/
+      3. mkdir -p "$output_path"
+      4. 將 task_id 與 output_path 寫入自己 worklog 的 task_context 欄位
+      此 step 為 Output Path Confirmation Principle 的 workflow 落地錨點。
+      Fast-path 查詢類任務（intent_result.task_type == "query" AND no file output）可在 fast_path_check 後直接跳到 deliver，不必走 init_output_path。
+    ref: agents/agent-ops/_protocols/workflows/init-output-path-flow.md
+    on_error: report_and_stop
+
+  - id: feedback_detect
+    action: manager_self
+    ref: agents/agent-ops/_protocols/workflows/feedback-detect-flow.md
+    note: "偵測用戶回饋語意，觸發 memory 保存（標準化流程）"
+    on_error: continue
+
+  - id: check_memory
+    action: read_memory
+    path: memory/MEMORY.md
+    on_error: continue
+
+  - id: classify
+    action: manager_self   # 2026-06-09 intent removed (self-contained): manager 直接 inline 分類
+    ref: workflow/classify-flow.md
+    output: intent_result
+    on_error: continue
+    note: "Manager inline classify（self-contained：intent 路由屬系統入口層、不進 team）。依 classify-flow.md 直接判斷 task_type / risk_level 寫入 intent_result，不再 dispatch intent agent。"
+
+  - id: fast_path_check
+    action: manager_self
+    condition: |
+      intent_result.task_type == "query"
+      AND intent_result.risk_level == "none"
+    then: goto deliver
+    else: goto needs_insight
+    on_error: goto needs_insight
+    note: "新增：輕量查詢直接回答，跳過重量步驟"
+
+  - id: needs_insight
+    action: manager_self
+    ref: workflow/insight-flow.md
+    input: intent_result
+    output: insight_result
+    on_error: continue
+    note: "精簡：只做 context_load，需求分析已由 classify 完成"
+
+  - id: feasibility
+    action: manager_self
+    ref: workflow/feasibility-flow.md
+    input: [intent_result, insight_result]
+    output: feasibility_result
+    on_error: continue
+
+  - id: hitl_gate
+    action: manager_self
+    ref: workflow/hitl-gate-flow.md
+    condition: "feasibility_result.risk_level == 'full_review'"
+    protocol: agents/agent-ops/_protocols/hitl-protocol.md
+    on_error: report_and_stop
+    note: "新增：Tier 3 操作暫停等待用戶確認"
+
+  - id: estimate_edit_budget  # self-added 2026-05-09 rule23-rollout-phase2
+    action: manager_self
+    note: |
+      派遣 dispatch_rounds 之前，若任務屬於「重構 / 改寫多 handler / 跨檔修改 / 批量 patch / 多 agent 檔案同步調整」類，
+      Manager 必須先估算 Edit 量並決定 batch 拆分（agent-ops 場景常見：rule rollout、protocol 修訂、批次 agent 升級）：
+      1. 逐檔估算：Edit count ≈ 該檔需動段落數 × 平均每段 Edit 次數（含 ref / 註解 / step 補加）
+      2. 估算 > 5 Edit / file 強制拆批；1 dispatch = 1 agent / 1 protocol 主改動（禁止 N file 混包）
+      3. 將估算結果與拆批計畫寫入 manager 自身 worklog 的 task_context.batch_plan 欄位
+      4. 跨批 review 維持 1 個（最後 1 reviewer 做 cross-batch adversarial，禁止 N batch × N reviewer）
+      非批量類任務（單一查詢、單檔小修改）可跳過此 step，但須在 worklog 註記 "batch_plan: n/a (single-target task)"。
+    ref: agents/agent-ops/_protocols/workflows/inline-verify-flow.md
+    on_skip: report_violation_and_block
+    on_error: report_and_stop
+    # 起源：依 agent-ops/manager soul.md Principle 25（dispatch 紀律）落地
+
+  - id: execute
+    action: dispatch_rounds
+    condition: "feasibility_result.decision in [proceed, proceed_with_warning]"
+    ref: workflow/execute-flow.md
+    protocol: workflow/dispatch-protocol.md
+    shared_context: true
+    trace_id: "$TRACE_ID"
+    inline_verify: agents/agent-ops/_protocols/workflows/inline-verify-flow.md
+    inline_verify_mandatory: true  # self-added 2026-05-09 rule23-rollout-phase2
+    on_inline_verify_skip: report_violation_and_block  # self-added 2026-05-09 rule23-rollout-phase2
+    on_inline_verify_fail: block_next_dispatch_and_resplit  # self-added 2026-05-09 rule23-rollout-phase2
+    verify_note: |
+      每個 dispatch 結束後、下一個 dispatch 之前，**必須**依 inline-verify-flow.md §B
+      核對 worker evidence_bundle（Edit 數 vs 宣稱、tsc / yaml lint exit_code、touched files 列表、brief scope match）。
+      失敗則阻斷下一批 dispatch，重派該批，不得接著派下一批。
+      此為 hard requirement，不是 best-effort（升級自原 verify_note，2026-05-09 rule23-rollout-phase2）。
+    on_error: retry_once
+    note: "升級：含 shared_context + trace_id 傳遞 + inline_verify hard contract"
+
+  - id: inline_verify_gate  # self-added 2026-05-09 rule23-rollout-phase2
+    action: manager_self
+    note: |
+      execute step 結束後的閘門：核對 dispatch_rounds 期間是否每批都跑了 inline_verify。
+      檢查項（依 inline-verify-flow.md §C worklog 落地 schema）：
+      1. manager worklog 的 inline_verify_log 條目數 == dispatch_rounds 派遣次數（一一對應）
+      2. 每條 inline_verify_log 含 status: PASS | PARTIAL | FAIL（非空）+ 4 項必檢結果（Edit count / exit_code / touched files / brief scope）
+      3. 任一 batch 缺 inline_verify_log 或 status==FAIL → block_and_report，不進 verify / governance
+      此 step 為 inline_verify 紀律的 workflow 落地稽核錨點（Principle 25 第 3 點）。
+    ref: agents/agent-ops/_protocols/workflows/inline-verify-flow.md
+    on_error: block_and_report
+
+  - id: verify
+    action: verify_agent_work
+    ref: workflow/verify-flow.md
+    skip_if: "feasibility_result.decision == proceed_query"
+    on_error: continue
+    note: "送審前的完整性快速檢查，確保 execute 產出符合預期再送 Governance"
+
+  - id: governance
+    action: dispatch_agent
+    agent: agent-ops/governance
+    model: opus
+    ref: workflow/governance-flow.md
+    trace_id: "$TRACE_ID"
+    on_error: report_and_continue
+    note: "no skip_if — Principle 10: Governance 永遠執行；於 verify 後執行獨立稽核"
+
+  - id: synthesize
+    action: merge_results
+    ref: workflow/synthesis-rules.md
+    on_error: partial_report
+    note: "新增獨立步驟：從 deliver 拆出，可獨立監控"
+
+  - id: deliver
+    action: respond_to_user
+    ref: workflow/deliver-flow.md
+    note: "精簡：只負責回覆"
+
+  - id: save_memory
+    action: write_memory
+    path: memory/
+    on_error: continue
+
+  - id: memory_hygiene_check # self-added 2026-04-25
+    action: manager_self
+    note: "回顧本輪 memory/：有無超過 90 天未 touch 的條目可歸檔至 archive/？MEMORY.md 索引是否一致？memory/ 檔案超 20 個時觸發週期性清理。retro 時依 rule-rollout-closure.md Open-TODO Aging SLO 檢視 Open TODOs 表，至少推進/結案 1 條超齡（>30 天）項（done 須先 grep/read 驗證交付物存在；否則重新指派或明確 abandon）。 依 memory-protocol.md §5 分類閘門先判 global vs project 再寫。"
+    on_error: continue
+
+  - id: memory_check
+    action: manager_self
+    note: "回顧本輪：是否有用戶糾正/審查結果/新 lesson 需存 memory？有則寫入 memory/ + 更新 MEMORY.md；無則跳過。 依 memory-protocol.md §5 分類閘門先判 global vs project 再寫。"
+    on_error: continue
+
+  - id: weekly_team_review  # self-added 2026-06-07, Phase 3.1 memory-overhaul
+    action: manager_self
+    ref: agents/agent-ops/_protocols/workflows/weekly-team-review-flow.md
+    note: |
+      每週 team 級輕量檢討（週期性維護 step）：
+      讀取本週 L2 weekly digest（agents/_log/digest/weekly/{YYYY-Www}.md），
+      檢視本週任務概覽、重複失敗、scope 違規、worker 學習升級提名。
+      無 weekly digest（本週無活動）→ step 1 no-op，不產空紀要。
+      產出：memory/team-review-{YYYY-Www}.md（本週檢討紀要 + 升級提名確認）。
+      屬加法 step，不改動現有 step。
+    on_error: continue
+
+  - id: output_change_summary  # self-added 2026-05-28 白話改動總結; modified 2026-06-03 輸出改 changed_files 清單; abs-path 2026-06-04
+    action: manager_self
+    note: |
+      回覆上層（user / manager）的訊息「最後一段」必須附上本次任務的「改動檔案清單」，用合法 JSON 格式（可被 parse），列出實際新增 / 修改 / 刪除的所有檔案路徑（含各 worker 產出）：
+
+      ```json
+      {
+        "changed_files": [
+          "C:/teamuq/teamuq-electron/src/renderer/views/Session/SessionTab.tsx",
+          "T:/共用雲端硬碟/快組隊.Agents/AgentOrg/output/sw/xxx/evidence.md"
+        ]
+      }
+      ```
+
+      - 路徑一律用「完整絕對路徑」（從磁碟機根開始，如 C:/... 或 T:/...）；**禁止相對路徑**。專案內檔案要把 CWD / 專案根目錄補上，讓每個 entry 不依賴 CWD 即可定位
+      - Windows 路徑寫進 JSON：建議用正斜線 `/`（合法且免跳脫）；若用反斜線需跳脫成 `\\`
+      - 只列本次實際異動（新增/修改/刪除）的檔案；不要列只讀取或查看過的檔
+      - 純查詢 / 分析（沒有改任何檔）：省略整段，完全不輸出此 JSON
+      - 這是回覆的最後一段，放在所有其他輸出之後，且必須是合法 JSON（可被 parse）
+    on_error: continue
+
+references:
+  - workflow/classify-flow.md
+  - workflow/dispatch-protocol.md
+  - workflow/synthesis-rules.md
+  - agents/agent-ops/_protocols/hitl-protocol.md
+  - agents/agent-ops/_protocols/rules/agent-slo.md
+  - agents/agent-ops/_protocols/verification-protocol.md
+  - agents/agent-ops/_protocols/workflows/init-output-path-flow.md
+  - agents/agent-ops/_protocols/workflows/inline-verify-flow.md  # self-added 2026-05-09 rule23-rollout-phase2

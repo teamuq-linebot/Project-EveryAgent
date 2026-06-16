@@ -1,0 +1,82 @@
+appId: tw.tuq.teamuq
+# 顯示名（視窗/捷徑/安裝程式標題）；exe 與安裝檔名維持 ASCII（見 win.executableName / nsis.artifactName）
+productName: 快組隊-AI團隊
+
+# 打包目錄
+directories:
+  output: dist
+  buildResources: build
+
+# 打入 asar 的檔案
+files:
+  - out/**/*
+  - package.json
+
+# native module 需解包到 asar 外才能被 require
+asarUnpack:
+  - "**/*.node"
+  - "node_modules/better-sqlite3/**"
+  - "node_modules/node-pty/**"
+
+# extraMetadata 覆蓋產出 package.json（確保 main 路徑正確）
+extraMetadata:
+  main: out/main/index.js
+
+# 內建預設 AgentOrg 範本（首啟 seed 用）
+extraResources:
+  - from: resources/agent-templates
+    to: agent-templates
+
+# 打包後補回 node-pty spawn-helper 的執行權限（macOS；防 builder 丟失 → posix_spawnp failed）
+afterPack: build/fix-pty-perms.cjs
+
+# ─── macOS ────────────────────────────────────────────────────────────────────
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # 公證（Notarize）：僅在提供 APPLE_ID 時生效
+  # notarize 由 afterSign hook 或 electron-notarize 處理；
+  # 無憑證時設 CSC_IDENTITY_AUTO_DISCOVERY=false 跳過簽章。
+  identity: null   # 覆蓋為 null 以支援 env gate；有憑證時移除此行
+
+dmg:
+  sign: false  # DMG 本身不需額外簽章（binary 已簽）
+
+# ─── Windows ──────────────────────────────────────────────────────────────────
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  # exe 檔名維持 ASCII（避免 CJK 路徑在部分工具鏈出問題）；顯示名仍為 productName
+  executableName: TeamUQ
+  # 有 CSC_LINK / CSC_KEY_PASSWORD 時自動簽章；無則略過
+  certificateSubjectName: null  # env gate：有憑證時移除此行
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  # 安裝檔檔名維持 ASCII；安裝程式介面/捷徑顯示 productName（中文）
+  artifactName: TeamUQ-Setup-${version}.${ext}
+
+# ─── Linux ────────────────────────────────────────────────────────────────────
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: Development
+
+# ─── 自動更新 publish 設定 ─────────────────────────────────────────────────────
+publish:
+  provider: github
+  owner: teamupquick
+  repo: teamuq-electron
+  # GH_TOKEN env var 必須設定才能發佈；build:unpack 不需要

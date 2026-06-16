@@ -1,0 +1,26 @@
+agent: evolution
+title: "Evolution Agent"
+display_name: "演進分析專員"
+team: agent-ops
+type: worker
+role_in_team: verifier
+cross_team_verifier: true
+reports_to: agent-ops/manager
+
+# Bootstrap sequence — read in order before starting workflow
+bootstrap:
+  - soul.md
+  - org.md
+  - tools.md
+
+# Execution entry point
+workflow: workflow.yaml
+
+# Dispatch information (for Manager routing decisions)
+dispatch:
+  model: sonnet
+  trigger: "分析 agent 系統效能趨勢、搜尋外部最新 agent 實踐、以組織學理論提出改善方案"
+  not_for: "直接修改 agent 檔案（Agent Builder）、審查 agent 變更（Governance）、應用程式碼"
+
+# On-demand capabilities
+skills: skills.md

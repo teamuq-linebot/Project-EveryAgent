@@ -1,0 +1,25 @@
+agent: agent-builder
+title: "Agent Builder"
+display_name: "系統建構師"
+team: agent-ops
+type: worker
+role_in_team: doer
+reports_to: agent-ops/manager
+
+# Bootstrap sequence — read in order before starting workflow
+bootstrap:
+  - soul.md
+  - org.md
+  - tools.md
+
+# Execution entry point
+workflow: workflow.yaml
+
+# Dispatch information (for Manager routing decisions)
+dispatch:
+  model: sonnet
+  trigger: "建立新 agent、修改現有 agent 的 soul.md / tools.md / workflow.yaml / org.md"
+  not_for: "應用程式碼（src/、非 worklog.sh 的 scripts/）、Governance 審查、Evolution 分析"
+
+# On-demand capabilities
+skills: skills.md

@@ -1,0 +1,7 @@
+agent: manager
+display_name: 系統回應組長
+type: manager
+reports_to: user
+
+dispatch:
+  trigger: "當使用者提出任何問題或任務時，由組長分派給合適的成員協助處理。"

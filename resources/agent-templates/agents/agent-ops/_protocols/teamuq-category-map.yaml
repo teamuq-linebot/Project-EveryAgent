@@ -1,0 +1,109 @@
+# 🚫 OBSOLETE — 2026-05-28
+#
+# 打卡機制已於 2026-05-28 全面移除。本文件保留作歷史考古，agent 系統不再使用
+# 任何打卡（TeamUQ 或 local worklog）。Agent 工作記錄改由外部 log 處理。
+# 請勿依本文件建立新的打卡流程。
+# 移除記錄：agents/agent-ops/manager/memory/punch_migration_state_20260527.md
+#
+# ---------------------------------------------------------------------------
+#
+# TeamUQ Category Mapping — Agent_<Name> per agent
+#
+# Used by ${AGENT_TEAMUQ_CATEGORY} in workflow.yaml punch_in step.
+# Source of truth for Phase 2/3 agent rewrite — 對照本檔以避免拼錯。
+#
+# 命名規則：
+#   1. 前綴一律 "Agent_"（依 punch-protocol.md §1.1 規範）
+#   2. team 名稱融入 PascalCase（避免同名 agent 衝突：manager / visual-stylist / researcher / doc-generator）
+#   3. 巢狀 team：以 team path 融入 PascalCase（例如 platform/gb10-sysadmin → GB10Sysadmin）
+#   4. shared team：去掉 team prefix（agents/agent-ops/_shared/calculator → Agent_Calculator）
+#
+# Last-updated: 2026-05-27 (Phase 1B — punch-migration-phase1b-rules-20260527)
+# Source: agent-ops/agent-builder under agent-ops/manager dispatch
+#
+# 維護指引：新增 agent 時，agent-ops/agent-builder 必須同步寫入本檔；
+# creation-validation.md §3 通用檢查項 #22 會檢查本檔是否已收錄。
+
+version: 1
+total_agents: 51  # 不含 test-agent（豁免於正式對照表）
+
+categories:
+  # ===== agent-ops team (5) =====
+  agent-ops/manager: "Agent_AgentOpsManager"
+  agent-ops/agent-builder: "Agent_AgentBuilder"
+  agent-ops/governance: "Agent_AgentOpsGovernance"
+  agent-ops/evolution: "Agent_AgentOpsEvolution"
+  agent-ops/researcher: "Agent_AgentOpsResearcher"
+
+  # ===== sw team (10) =====
+  sw/manager: "Agent_SWManager"
+  sw/architect: "Agent_SWArchitect"
+  sw/claude-md-author: "Agent_SWClaudeMdAuthor"
+  sw/developer: "Agent_SWDeveloper"
+  sw/devops: "Agent_SWDevops"
+  sw/e2e-tester: "Agent_SWE2ETester"
+  sw/researcher: "Agent_SWResearcher"
+  sw/reviewer: "Agent_SWReviewer"
+  sw/seo-geo-specialist: "Agent_SWSEOGEOSpecialist"
+  sw/tester: "Agent_SWTester"
+
+  # ===== edu team (8) =====
+  edu/manager: "Agent_EduManager"
+  edu/content-designer: "Agent_EduContentDesigner"
+  edu/content-evaluator: "Agent_EduContentEvaluator"
+  edu/doc-generator: "Agent_EduDocGenerator"
+  edu/editorial-director: "Agent_EduEditorialDirector"
+  edu/edu-researcher: "Agent_EduResearcher"
+  edu/qa-reviewer: "Agent_EduQAReviewer"
+  edu/visual-stylist: "Agent_EduVisualStylist"
+
+  # ===== sales team (9) =====
+  sales/manager: "Agent_SalesManager"
+  sales/content-reviewer: "Agent_SalesContentReviewer"
+  sales/doc-generator: "Agent_SalesDocGenerator"
+  sales/industry-researcher: "Agent_SalesIndustryResearcher"
+  sales/knowledge-base: "Agent_SalesKnowledgeBase"
+  sales/partnership-strategist: "Agent_SalesPartnershipStrategist"
+  sales/proposal-designer: "Agent_SalesProposalDesigner"
+  sales/qa-reviewer: "Agent_SalesQAReviewer"
+  sales/visual-stylist: "Agent_SalesVisualStylist"
+
+  # ===== finance team (6) =====
+  finance/manager: "Agent_FinanceManager"
+  finance/researcher: "Agent_FinanceResearcher"
+  finance/billing-builder: "Agent_FinanceBillingBuilder"
+  finance/billing-renderer: "Agent_FinanceBillingRenderer"
+  finance/invoice-ocr: "Agent_FinanceInvoiceOCR"
+  finance/billing-qa: "Agent_FinanceBillingQA"
+
+  # ===== bni team (10) =====
+  bni/manager: "Agent_BNIManager"
+  bni/doc-generator: "Agent_BNIDocGenerator"
+  bni/extract-members: "Agent_BNIExtractMembers"
+  bni/industry-groups: "Agent_BNIIndustryGroups"
+  bni/label-members: "Agent_BNILabelMembers"
+  bni/organize-members: "Agent_BNIOrganizeMembers"
+  bni/qa-referee: "Agent_BNIQAReferee"
+  bni/researcher: "Agent_BNIResearcher"
+  bni/update-members: "Agent_BNIUpdateMembers"
+  bni/visual-stylist: "Agent_BNIVisualStylist"
+
+  # ===== platform/gb10-sysadmin (single agent, 1) =====
+  platform/gb10-sysadmin: "Agent_GB10Sysadmin"
+
+  # ===== shared team (2) =====
+  agents/agent-ops/_shared/calculator: "Agent_Calculator"
+  agents/agent-ops/_shared/intent: "Agent_Intent"
+
+# ===== Test agents (out of scope, kept for reference) =====
+test_agents:
+  test-agent: "Agent_TestAgent"  # 不計入正式 count；豁免於 punch-protocol 強制範疇
+
+# ===== Validation rules =====
+# 1. category name 必為 ASCII，符合 [A-Za-z0-9_] 字元集
+# 2. 前綴一律 "Agent_"
+# 3. 不得重複（每個 categoryName 對應唯一 agent）
+# 4. team 巢狀路徑用 "/" 分隔（保持與 agents/ 目錄一致）
+#
+# 後端對接：appsync-client.sh create-subtask 用 --category-name <value> 傳入；
+# 後端自動 find-or-create，所以 category 不存在會自動建立。

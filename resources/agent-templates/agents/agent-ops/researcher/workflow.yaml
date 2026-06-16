@@ -1,0 +1,118 @@
+name: Agent Ops Researcher Workflow
+description: Worker 簡版 — 接收 agent 系統觀測任務（盤點/統計/考古/silent failure/引用矩陣），產出結構化現狀報告。
+
+error_policy:
+  default: diagnose_and_retry
+  max_retries: 2
+  on_max_retries: report_what_was_done_and_what_failed
+
+steps:
+  - id: parse_input
+    action: parse_input
+    description: |
+      從 Manager 派遣訊息中解析必要欄位：
+      - task_type（必填，五選一：worklog_stats / anatomy_audit / protocol_archaeology / silent_failure_scan / cross_agent_reference）
+      - scope（選填：team / agent / protocol / keyword，依 task_type 決定）
+      - time_window（選填：最近 N 天 / 月，預設「全期」）
+      - language（預設繁體中文）
+      若 task_type 缺失或不在五選一，停止並回報 Manager 補充。
+    on_error: stop_and_report
+
+  - id: check_memory
+    action: read_file
+    path: agents/agent-ops/researcher/memory/MEMORY.md
+    description: 讀取過去同類盤點的有效查詢策略、已知 baseline、避免重複工作
+    on_error: continue
+
+  - id: research_phase
+    action: observation
+    description: |
+      依 task_type 執行對應 skill（見 skills.md）：
+        - worklog_stats: 先 Read agents/worklogs/index.jsonl + Bash wc/grep -c → 切片計數 → 需精確值委派 calculator
+        - anatomy_audit: Glob agents/{scope}/*/agent.yaml → read_multiple_files 讀 soul/skills/tools/workflow → 比對 anatomy.md → 產出矩陣
+        - protocol_archaeology: Read agents/agent-ops/_protocols/{scope}.md → Grep 全 agent 找引用 → Bash git log 追溯（若可用）
+        - silent_failure_scan: Glob agents/**/worklog/*.json → Grep status=started → Read 取時間戳 → 過濾 > 10min 孤兒
+        - cross_agent_reference: Grep -n {keyword} agents/ → 分類 hard-coded vs 文字提及 → 產出矩陣
+      每筆觀察必須附 file:line 或 worklog timestamp 證據。
+    sub_steps:
+      - glob_or_read_index: 取得觀測對象清單
+      - bulk_read: read_multiple_files 一次讀多個（T:\ 必用）
+      - grep_or_filter: 過濾出符合條件的證據
+      - tag_evidence: 每筆標註 file:line / worklog:timestamp
+    on_error:
+      action: diagnose_and_retry
+      max_attempts: 2
+      on_max: report_what_was_done_and_what_failed
+
+  - id: request_calculation_if_needed
+    action: report_to_manager
+    description: |
+      若觀測結果需要精確數值計算（worklog 完成率百分比、平均時長、success ratio、孤兒任務時間差秒數），
+      回報 Manager 請求派遣 agents/agent-ops/_shared/calculator 處理，不自行心算。
+      簡單計數（wc -l / grep -c）可由 Bash 直接產出，不需委派。
+      等待 calculator 結果回傳後繼續。
+    on_error: continue
+
+  - id: structure_findings
+    action: write_file
+    path: agents/agent-ops/researcher/memory/draft_report.md
+    description: |
+      將觀測證據按 task_type 對應結構撰寫成 markdown 報告：
+        # Agent 系統觀測報告 — {task_type}
+        ## 1. 任務範圍（scope / time_window）
+        ## 2. 觀測方法（用了哪些 skill / 工具 / 過濾條件）
+        ## 3. 主要發現（每筆附 file:line 或 worklog:timestamp 證據）
+        ## 4. 數據統計（若有，標註是否經 calculator 驗證）
+        ## 5. 異常 / 缺口列表（純客觀描述，不下判斷、不給建議）
+        ## 附錄：原始證據引用清單
+      使用 Manager 指定 language（預設繁體中文）。
+    on_error: diagnose_and_retry
+
+  - id: self_verify
+    action: checklist
+    description: |
+      交付前自我檢查（任一不通過則回到 research_phase 補強）：
+        [ ] 每個結論是否附 file:line 或 worklog:timestamp 證據？
+        [ ] 數字是否經 calculator 驗證（或來自 wc/grep -c 等可重現命令）？
+        [ ] 是否誤踩 Builder（修改建議）/ Evolution（改進方案）/ Governance（政策判斷）的領域？
+        [ ] 報告結構是否清楚（Manager / Evolution / Governance 可直接消費）？
+        [ ] 是否誤把 silent failure 寫成「任務還在跑」？（需檢查 ended_at 時間戳判斷）
+    on_error: diagnose_and_retry
+
+  - id: save_memory
+    action: write_memory
+    path: agents/agent-ops/researcher/memory/MEMORY.md
+    description: 紀錄本次觀測的有效查詢策略、有用的 grep pattern、發現的 baseline 數字（供下次重用）
+    on_error: continue
+
+  - id: deliver_report
+    action: return_to_manager
+    description: |
+      將最終 markdown 觀測報告回傳 agent-ops/manager。
+      不直接傳給 Evolution / Governance / Builder（Worker 只面對 Manager）。
+    on_error: stop_and_report
+
+  - id: output_change_summary  # self-added 2026-05-28 白話改動總結; modified 2026-06-03 輸出改 changed_files 清單; abs-path 2026-06-04
+    action: manager_self
+    note: |
+      回覆上層（user / manager）的訊息「最後一段」必須附上本次任務的「改動檔案清單」，用合法 JSON 格式（可被 parse），列出實際新增 / 修改 / 刪除的所有檔案路徑（含各 worker 產出）：
+
+      ```json
+      {
+        "changed_files": [
+          "C:/teamuq/teamuq-electron/src/renderer/views/Session/SessionTab.tsx",
+          "T:/共用雲端硬碟/快組隊.Agents/AgentOrg/output/sw/xxx/evidence.md"
+        ]
+      }
+      ```
+
+      - 路徑一律用「完整絕對路徑」（從磁碟機根開始，如 C:/... 或 T:/...）；**禁止相對路徑**。專案內檔案要把 CWD / 專案根目錄補上，讓每個 entry 不依賴 CWD 即可定位
+      - Windows 路徑寫進 JSON：建議用正斜線 `/`（合法且免跳脫）；若用反斜線需跳脫成 `\\`
+      - 只列本次實際異動（新增/修改/刪除）的檔案；不要列只讀取或查看過的檔
+      - 純查詢 / 分析（沒有改任何檔）：省略整段，完全不輸出此 JSON
+      - 這是回覆的最後一段，放在所有其他輸出之後，且必須是合法 JSON（可被 parse）
+    on_error: continue
+
+references:
+  - agents/agent-ops/researcher/skills.md
+  - agents/agent-ops/_protocols/rules/agent-anatomy.md

@@ -1,0 +1,4 @@
+agent: assistant
+display_name: 萬用助理
+type: worker
+reports_to: general/manager

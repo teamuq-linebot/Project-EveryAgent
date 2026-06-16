@@ -1,0 +1,57 @@
+name: Calculator Workflow
+description: 接收計算請求，用程式碼執行計算，返回結構化結果
+
+error_policy:
+  default: retry_once
+  max_retries: 1
+  on_step_error: report_and_continue
+
+steps:
+  - id: check_memory
+    action: read_memory
+    path: memory/MEMORY.md
+    on_error: continue
+
+  - id: parse_request
+    action: parse_calculation_request
+    ref: workflow/calculate-flow.md
+    on_error: report_and_stop
+    note: "解析計算請求，確認輸入值、公式、預期輸出格式"
+
+  - id: execute_calculation
+    action: run_code
+    ref: workflow/calculate-flow.md
+    on_error: retry_once
+    note: "用 Bash(node -e ...) 或 Bash(python -c ...) 執行計算，絕不心算"
+
+  - id: validate_result
+    action: validate
+    ref: workflow/calculate-flow.md
+    on_error: report_and_continue
+    note: "驗證結果合理性（邊界條件、量級檢查）"
+
+  - id: save_memory
+    action: write_memory
+    path: memory/
+    on_error: continue
+
+  - id: output_change_summary  # self-added 2026-05-28 白話改動總結; modified 2026-06-03 輸出改 changed_files 清單; abs-path 2026-06-04
+    action: manager_self
+    note: |
+      回覆上層（user / manager）的訊息「最後一段」必須附上本次任務的「改動檔案清單」，用合法 JSON 格式（可被 parse），列出實際新增 / 修改 / 刪除的所有檔案路徑（含各 worker 產出）：
+
+      ```json
+      {
+        "changed_files": [
+          "C:/teamuq/teamuq-electron/src/renderer/views/Session/SessionTab.tsx",
+          "T:/共用雲端硬碟/快組隊.Agents/AgentOrg/output/sw/xxx/evidence.md"
+        ]
+      }
+      ```
+
+      - 路徑一律用「完整絕對路徑」（從磁碟機根開始，如 C:/... 或 T:/...）；**禁止相對路徑**。專案內檔案要把 CWD / 專案根目錄補上，讓每個 entry 不依賴 CWD 即可定位
+      - Windows 路徑寫進 JSON：建議用正斜線 `/`（合法且免跳脫）；若用反斜線需跳脫成 `\\`
+      - 只列本次實際異動（新增/修改/刪除）的檔案；不要列只讀取或查看過的檔
+      - 純查詢 / 分析（沒有改任何檔）：省略整段，完全不輸出此 JSON
+      - 這是回覆的最後一段，放在所有其他輸出之後，且必須是合法 JSON（可被 parse）
+    on_error: continue
